@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>BotC Script-PDF</h1>
+  <p class="lead">Script-JSON hochladen oder Scriptnamen eingeben, doppelseitiges Script-PDF erzeugen lassen und herunterladen.</p>
+
+  <form id="form" class="card">
+    <label for="script">Script-JSON <span class="hint">(Format des offiziellen Script-Tools)</span></label>
+    <div id="drop" class="drop">
+      <span id="drop-text"><strong>Datei auswählen</strong> oder hierher ziehen</span>
+      <input id="script" name="script" type="file" accept=".json,application/json" hidden>
+    </div>
+    <button id="clear-file" class="link" type="button" hidden>Datei entfernen</button>
+
+    <div class="or"><span>oder</span></div>
+
+    <label for="script_name">Scriptname <span class="hint">(Vorschläge von botcscripts.com, ab 3 Zeichen)</span></label>
+    <div class="combo">
+      <input id="script_name" name="script_name" type="text" maxlength="200" autocomplete="off"
+             placeholder="z. B. Trouble Brewing" role="combobox" aria-autocomplete="list"
+             aria-expanded="false" aria-controls="suggestions">
+      <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+    </div>
+    <input id="script_pk" name="script_pk" type="hidden">
+    <div id="script_info" class="info" aria-live="polite" hidden></div>
+
+    <label for="name_color">Schriftfarbe des Scriptnamens</label>
+    <div class="row">
+      <input id="name_color" name="name_color" type="color" value="{{ default_color }}">
+      <span id="color_hex" class="hint">{{ default_color }}</span>
+    </div>
+
+    <label for="logo_description">Logo-Beschreibung <span class="hint">(optional)</span></label>
+    <input id="logo_description" name="logo_description" type="text" maxlength="500"
+           placeholder="z. B. goldene Waage vor dunklem Nachthimmel">
+
+    {% if openai_available %}
+    <label for="logo_provider">Logo-Anbieter</label>
+    <select id="logo_provider" name="logo_provider">
+      <option value="pollinations">Pollinations (kostenlos)</option>
+      <option value="openai">OpenAI (kostenpflichtig)</option>
+    </select>
+    {% set q = openai_quota %}
+    {% if q.limited %}
+    <p class="hint{% if q.exhausted %} warn{% endif %}" id="openai_quota">
+      OpenAI-Logos: <strong>{{ q.used }} von {{ q.limit }}</strong> in den letzten 7 Tagen verbraucht{% if q.running %}
+      ({{ q.running }} läuft gerade){% endif %}, noch <strong>{{ q.remaining }}</strong> frei.
+      {% if q.exhausted %}
+        Kontingent ausgeschöpft{% if q.next_free_at %} – das nächste ist ab <strong>{{ q.next_free_at }}</strong> möglich{% endif %}.
+      {% elif q.next_free_at %}
+        Der nächste Platz wird am {{ q.next_free_at }} wieder frei.
+      {% endif %}
+      Logos, die schon vorhanden sind, und Pollinations zählen nicht.
+    </p>
+    {% endif %}
+    {% else %}
+    <input type="hidden" name="logo_provider" value="pollinations">
+    {% endif %}
+
+    <label class="check"><input type="checkbox" name="blankbg">
+      <span>Druckerfreundlicher, leerer Hintergrund</span></label>
+    <label class="check"><input type="checkbox" name="new_logo">
+      <span>Neues Logo erzeugen <span class="hint">(sonst wird ein bereits vorhandenes Logo zu diesem Script wiederverwendet)</span></span></label>
+
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button id="submit" type="submit">PDF erzeugen</button>
+    <div id="result" hidden></div>
+  </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById('form');
+  var fileInput = document.getElementById('script');
+  var drop = document.getElementById('drop');
+  var dropText = document.getElementById('drop-text');
+  var clearFile = document.getElementById('clear-file');
+  var scriptName = document.getElementById('script_name');
+  var scriptPk = document.getElementById('script_pk');
+  var scriptInfo = document.getElementById('script_info');
+  var list = document.getElementById('suggestions');
+  var color = document.getElementById('name_color');
+  var colorHex = document.getElementById('color_hex');
+  var submit = document.getElementById('submit');
+  var result = document.getElementById('result');
+  var timer = null;
+
+  function showFile() {
+    var f = fileInput.files && fileInput.files[0];
+    dropText.textContent = '';
+    clearFile.hidden = !f;
+    // Datei und Scriptname schliessen sich aus: mit Datei ist das Namensfeld gesperrt.
+    scriptName.disabled = !!f;
+    if (f) { closeList(); }
+    scriptInfo.hidden = !!f || !scriptInfo.textContent;
+    if (f) { dropText.textContent = f.name; return; }
+    dropText.appendChild(el('strong', '', 'Datei auswählen'));
+    dropText.appendChild(document.createTextNode(' oder hierher ziehen'));
+  }
+  drop.addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', showFile);
+  clearFile.addEventListener('click', function () { fileInput.value = ''; showFile(); });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); });
+  });
+  drop.addEventListener('drop', function (e) {
+    if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; showFile(); }
+  });
+  color.addEventListener('input', function () { colorHex.textContent = color.value; });
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  // --- Autocomplete fuer den Scriptnamen (botcscripts.com) ---------------------------------
+  var MIN_CHARS = 3;
+  var items = [];
+  var active = -1;
+  var searchTimer = null;
+  var searchSeq = 0;
+
+  function meta(item) {
+    var parts = [];
+    if (item.author) parts.push('von ' + item.author);
+    if (item.version) parts.push('Version ' + item.version);
+    if (item.script_type) parts.push(item.script_type);
+    return parts.join(' · ');
+  }
+
+  function info(node, cls) {
+    scriptInfo.textContent = '';
+    scriptInfo.className = 'info' + (cls ? ' ' + cls : '');
+    if (!node) { scriptInfo.hidden = true; return; }
+    scriptInfo.appendChild(node);
+    scriptInfo.hidden = false;
+  }
+
+  function choose(item, keepText) {
+    scriptPk.value = item.pk;
+    if (!keepText) scriptName.value = item.name;
+    var wrap = el('span');
+    wrap.appendChild(document.createTextNode('Ausgewählt: '));
+    var a = el('a', '', item.name);
+    a.href = item.url; a.target = '_blank'; a.rel = 'noopener';
+    wrap.appendChild(a);
+    wrap.appendChild(el('span', 'meta', ' (' + meta(item) + ') – bitte prüfen, ob es das richtige Script ist.'));
+    info(wrap);
+  }
+
+  function closeList() {
+    list.hidden = true;
+    list.textContent = '';
+    scriptName.setAttribute('aria-expanded', 'false');
+    scriptName.removeAttribute('aria-activedescendant');
+    active = -1;
+  }
+
+  function setActive(i) {
+    var nodes = list.children;
+    if (active >= 0 && nodes[active]) nodes[active].classList.remove('active');
+    active = i;
+    if (active >= 0 && nodes[active]) {
+      nodes[active].classList.add('active');
+      nodes[active].scrollIntoView({ block: 'nearest' });
+      scriptName.setAttribute('aria-activedescendant', nodes[active].id);
+    }
+  }
+
+  function showList() {
+    list.textContent = '';
+    items.forEach(function (item, i) {
+      var li = el('li');
+      li.id = 'suggestion-' + i;
+      li.setAttribute('role', 'option');
+      li.appendChild(el('strong', '', item.name));
+      li.appendChild(el('span', 'meta', meta(item)));
+      // mousedown statt click: kommt vor dem blur des Eingabefelds.
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); choose(item); closeList(); });
+      li.addEventListener('mousemove', function () { if (active !== i) setActive(i); });
+      list.appendChild(li);
+    });
+    list.hidden = !items.length;
+    scriptName.setAttribute('aria-expanded', items.length ? 'true' : 'false');
+    active = -1;
+  }
+
+  function search(q) {
+    var seq = ++searchSeq;
+    fetch('api/search?q=' + encodeURIComponent(q)).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+    }).then(function (res) {
+      if (seq !== searchSeq || scriptPk.value) return;  // veraltete Antwort oder schon ausgewaehlt
+      if (!res.ok) { closeList(); info(el('span', '', res.body.error || 'Suche fehlgeschlagen.'), 'warn'); return; }
+      items = res.body.results || [];
+      if (!items.length) {
+        closeList();
+        info(el('span', '', 'Kein passendes Script auf botcscripts.com gefunden.'), 'warn');
+        return;
+      }
+      var exact = items.filter(function (it) { return it.name.toLowerCase() === q.toLowerCase(); })[0];
+      if (exact) { choose(exact, true); } else {
+        info(el('span', 'meta', 'Bitte einen Vorschlag auswählen, um das Script vorher prüfen zu können.'));
+      }
+      if (document.activeElement === scriptName) showList();
+    }).catch(function () {
+      if (seq === searchSeq) { closeList(); info(el('span', '', 'Suche fehlgeschlagen: Server nicht erreichbar.'), 'warn'); }
+    });
+  }
+
+  scriptName.addEventListener('input', function () {
+    scriptPk.value = '';
+    clearTimeout(searchTimer);
+    searchSeq++;
+    var q = scriptName.value.trim();
+    if (q.length < MIN_CHARS) { closeList(); info(null); return; }
+    info(el('span', 'meta', 'Suche auf botcscripts.com ...'));
+    searchTimer = setTimeout(function () { search(q); }, 300);
+  });
+  scriptName.addEventListener('keydown', function (e) {
+    if (list.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(active + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
+    else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); choose(items[active]); closeList(); }
+    else if (e.key === 'Escape') { closeList(); }
+  });
+  scriptName.addEventListener('focus', function () { if (items.length && !scriptPk.value && scriptName.value.trim().length >= MIN_CHARS) showList(); });
+  scriptName.addEventListener('blur', closeList);
+
+  function render(job) {
+    // Der Bereich wird bei jeder Abfrage neu aufgebaut: Zustand des Protokolls (offen, Scrollposition) merken.
+    var oldLog = result.querySelector('details');
+    var oldPre = oldLog && oldLog.querySelector('pre');
+    var logOpen = !!(oldLog && oldLog.open);
+    var logTop = oldPre ? oldPre.scrollTop : 0;
+    var logAtEnd = !oldPre || oldPre.scrollHeight - oldPre.scrollTop - oldPre.clientHeight < 8;
+
+    result.hidden = false;
+    result.textContent = '';
+    var box = el('div', 'status');
+    if (job.status === 'queued' || job.status === 'running') {
+      box.appendChild(el('div', 'spinner'));
+      box.appendChild(el('span', '', job.message));
+    } else if (job.status === 'done') {
+      box.appendChild(el('span', job.partial ? 'warn' : '', job.message));
+    } else {
+      box.appendChild(el('span', 'error', job.message || 'Fehler'));
+    }
+    result.appendChild(box);
+
+    if (job.status === 'done' && job.download_url) {
+      var a = el('a', 'download', job.partial ? 'ZIP herunterladen' : 'PDF herunterladen');
+      a.href = job.download_url;
+      a.setAttribute('download', job.filename || '');
+      result.appendChild(a);
+    }
+    if (job.log && job.log.length) {
+      var d = el('details');
+      d.appendChild(el('summary', '', 'Protokoll'));
+      var pre = el('pre', '', job.log.join('\n'));
+      d.appendChild(pre);
+      d.open = logOpen || job.status === 'error';
+      result.appendChild(d);
+      // Wer unten mitliest, bleibt am Ende; wer hochgescrollt hat, bleibt an seiner Stelle.
+      pre.scrollTop = logAtEnd ? pre.scrollHeight : logTop;
+    }
+  }
+
+  function fail(message) {
+    clearInterval(timer);
+    submit.disabled = false;
+    render({ status: 'error', message: message, log: [] });
+  }
+
+  function poll(url) {
+    fetch(url).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+    }).then(function (res) {
+      if (!res.ok) { fail(res.body.error || 'Auftrag nicht gefunden.'); return; }
+      render(res.body);
+      if (res.body.status === 'done' || res.body.status === 'error') {
+        clearInterval(timer);
+        submit.disabled = false;
+      }
+    }).catch(function () { fail('Der Server ist nicht erreichbar.'); });
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!fileInput.files.length && !scriptName.value.trim()) {
+      fail('Bitte eine Script-JSON-Datei auswählen oder einen Scriptnamen eingeben.'); return;
+    }
+    submit.disabled = true;
+    render({ status: 'queued', message: fileInput.files.length ? 'Wird hochgeladen ...' : 'Wird gesendet ...', log: [] });
+    fetch('api/jobs', { method: 'POST', body: new FormData(form) }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+    }).then(function (res) {
+      if (!res.ok) { fail(res.body.error || 'Upload fehlgeschlagen.'); return; }
+      render(res.body);
+      var url = 'api/jobs/' + res.body.id;
+      clearInterval(timer);
+      timer = setInterval(function () { poll(url); }, 1500);
+    }).catch(function () { fail('Der Server ist nicht erreichbar.'); });
+  });
+})();
+</script>
+{% endblock %}

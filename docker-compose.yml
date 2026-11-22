@@ -1,0 +1,36 @@
+# BotC Script-PDF WebApp
+#
+#   OPENAI_API_KEY=sk-... docker compose up -d --build
+#
+# Ohne OPENAI_API_KEY laeuft die App auch, Logos gibt es dann nur ueber Pollinations (kostenlos).
+# Erster Start: Mit admin / deleteme! anmelden (Passwortwechsel ist Pflicht), Konten unter
+# "Benutzerverwaltung" freischalten.
+# Claude (MCP): in claude.ai als eigenen Connector https://botc.example.com/mcp hinzufuegen.
+services:
+  botc-webapp:
+    build: .
+    image: botc-webapp:latest
+    restart: unless-stopped
+    ports:
+      # Nur lokal erreichbar. Fuer den Zugriff von aussen einen HTTPS-Reverse-Proxy davorsetzen
+      # (und unten BOTC_WEB_SECURE_COOKIES/BOTC_WEB_TRUST_PROXY auf 1 stellen).
+      - "0.0.0.0:8090:8090"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      BOTC_WEB_SECURE_COOKIES: ${BOTC_WEB_SECURE_COOKIES:-0}
+      BOTC_WEB_TRUST_PROXY: ${BOTC_WEB_TRUST_PROXY:-0}
+      # Oeffentliche Adresse: noetig fuer OAuth/MCP (Claude prueft, dass alle Adressen zusammenpassen).
+      # Beispiel: https://botc.example.com (leer = aus der Anfrage)
+      BOTC_WEB_PUBLIC_URL: ${BOTC_WEB_PUBLIC_URL:-}
+      # Proxy, ueber den die Domain hereinkommt: nur von dort wird die echte Besucher-IP uebernommen.
+      # Beispiel: 192.0.2.10 (kommagetrennt, leer = keinem Proxy vertrauen)
+      BOTC_WEB_TRUSTED_PROXIES: ${BOTC_WEB_TRUSTED_PROXIES:-}
+    volumes:
+      - botc_data:/app/webapp_data
+      - botc_logos:/app/logos
+      - botc_scripts:/app/downloaded_scripts
+
+volumes:
+  botc_data:
+  botc_logos:
+  botc_scripts:

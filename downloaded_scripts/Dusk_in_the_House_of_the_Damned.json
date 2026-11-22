@@ -1,0 +1,42 @@
+[
+  {
+    "id": "_meta",
+    "name": "Dusk in the House of the Damned",
+    "author": "Shade (Shadowqueer)",
+    "bootlegger": [
+      "Ignore the Legion/Magician Jinx",
+      "If the Cannibal eats the drunk Village Idiot, the Cannibal is drunk",
+      "The Magician does not register as a Townsfolk to the No Dashii's ability.",
+      "Use the Poppy Grower Optional Rule"
+    ]
+  },
+  "noble",
+  "pixie",
+  "general",
+  "villageidiot",
+  "king",
+  "huntsman",
+  "fisherman",
+  "alchemist",
+  "cannibal",
+  "farmer",
+  "choirboy",
+  "magician",
+  "poppygrower",
+  "ogre",
+  "lunatic",
+  "damsel",
+  "heretic",
+  "harpy",
+  "wizard",
+  "goblin",
+  "scarletwoman",
+  "lilmonsta",
+  "nodashii",
+  "imp",
+  "legion",
+  "bureaucrat",
+  "deviant",
+  "bootlegger",
+  "sentinel"
+]

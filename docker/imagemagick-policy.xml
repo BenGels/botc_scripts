@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policymap [
+  <!ELEMENT policymap (policy)*>
+  <!ATTLIST policymap xmlns CDATA #FIXED "">
+  <!ELEMENT policy EMPTY>
+  <!ATTLIST policy xmlns CDATA #FIXED "" domain NMTOKEN #REQUIRED
+    name NMTOKEN #IMPLIED pattern CDATA #IMPLIED rights NMTOKEN #IMPLIED
+    stealth NMTOKEN #IMPLIED value CDATA #IMPLIED>
+]>
+<!--
+  Policy fuer das botc-webapp-Image. Ersetzt Debians Vorgabe, die PDF sperrt und Bilder auf
+  wenige hundert MB begrenzt. botc_tokens schreibt A4-Seiten mit 300 dpi (2480x3508 px) als PDF.
+  Verarbeitet werden nur eigene Bilder (Token, Hintergruende) - keine fremden Uploads.
+-->
+<policymap>
+  <policy domain="resource" name="memory" value="2GiB"/>
+  <policy domain="resource" name="map" value="4GiB"/>
+  <policy domain="resource" name="disk" value="8GiB"/>
+  <policy domain="resource" name="area" value="512MP"/>
+  <policy domain="resource" name="width" value="32KP"/>
+  <policy domain="resource" name="height" value="32KP"/>
+  <!-- Fremde Formate mit bekannten Sicherheitsproblemen bleiben gesperrt. -->
+  <policy domain="coder" rights="none" pattern="{MVG,MSL,URL,HTTPS,HTTP,FTP,EPHEMERAL,TEXT}"/>
+  <policy domain="path" rights="none" pattern="@*"/>
+</policymap>

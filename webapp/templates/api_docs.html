@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}API v1 · BotC Script-PDF{% endblock %}
+{% block main_class %} class="docs"{% endblock %}
+{% block styles %}
+  main.docs { max-width: 900px; }
+  .docs h1 { font-size: 1.75rem; }
+  .docs h2 { font-size: 1.25rem; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .docs h3 { font-size: 1.05rem; margin: 24px 0 6px; }
+  .docs p, .docs li { max-width: 72ch; }
+  .docs code, .docs pre { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+  .docs :not(pre) > code { font-size: .88em; background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+                           padding: 0 4px; overflow-wrap: anywhere; }
+  .docs pre { max-height: none; font-size: .82rem; white-space: pre; overflow-x: auto; }
+  .toc { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 8px; padding: 0; list-style: none; font-size: .92rem; }
+  .toc a, .docs a { color: var(--accent); }
+  .endpoint { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 28px 0 6px; }
+  .endpoint h3 { margin: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1rem; overflow-wrap: anywhere; }
+  .method { font: 600 .75rem/1.6 ui-monospace, Menlo, Consolas, monospace; padding: 1px 8px; border-radius: 4px;
+            color: var(--accent-text); background: var(--accent); }
+  .method.get { background: var(--ok); color: var(--bg); }
+  .table-wrap { overflow-x: auto; margin: 8px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td:first-child { white-space: nowrap; }
+  .note { padding: 10px 14px; border: 1px solid var(--warn); border-radius: 8px; background: var(--card); }
+{% endblock %}
+{% block content %}
+  <h1>BotC Script-PDF · API v1</h1>
+  <p class="lead">Script-PDFs per HTTP erzeugen: Auftrag anlegen, Status abfragen, PDF herunterladen.
+    Basis-URL: <code>{{ base_url }}</code></p>
+
+  <ul class="toc">
+    <li><a href="#auth">Anmeldung</a></li>
+    <li><a href="#flow">Ablauf</a></li>
+    <li><a href="#create">Auftrag anlegen</a></li>
+    <li><a href="#status">Status</a></li>
+    <li><a href="#download">Download</a></li>
+    <li><a href="#job">Auftrags-Objekt</a></li>
+    <li><a href="#errors">Fehler</a></li>
+    <li><a href="#examples">Beispiele</a></li>
+    <li><a href="#limits">Grenzen</a></li>
+  </ul>
+
+  <h2 id="auth">Anmeldung</h2>
+  <p>Jede Anfrage meldet sich per <strong>HTTP Basic Auth</strong> mit den normalen Login-Daten der Web-Oberfläche an:
+    E-Mail-Adresse (bzw. Benutzername) und Passwort. Es gibt keine Sitzung und kein Token.</p>
+  <pre>Authorization: Basic base64("email:passwort")</pre>
+  <ul>
+    <li>Nur freigeschaltete Konten haben Zugriff. Konten, die noch ihr Startpasswort ändern müssen, erhalten
+      <code>403 password_change_required</code>, bis das Passwort in der Web-Oberfläche geändert ist.</li>
+    <li>Fehlgeschlagene Anmeldungen zählen in dieselbe Sperre wie der Login im Browser: nach 5 Fehlversuchen
+      15 Minuten Pause (<code>429 too_many_attempts</code>).</li>
+  </ul>
+  <p class="note">Basic Auth überträgt das Passwort bei jeder Anfrage. Die API nur über <strong>HTTPS</strong> nutzen.</p>
+
+  <h2 id="flow">Ablauf</h2>
+  <p>Eine PDF-Erzeugung dauert meist ein bis zwei Minuten. Deshalb arbeitet die API mit Aufträgen:</p>
+  <ol>
+    <li><code>POST /pdfs</code> legt einen Auftrag an und antwortet sofort mit <code>202</code> und seiner ID.</li>
+    <li><code>GET /pdfs/{id}</code> liefert den Status, bis er <code>done</code> oder <code>error</code> ist
+      (z.&nbsp;B. alle 2–5 Sekunden abfragen).</li>
+    <li><code>GET /pdfs/{id}/download</code> liefert das fertige PDF.</li>
+  </ol>
+  <p>Die ID ist ein 32-stelliger Zufalls-Hash (z.&nbsp;B. <code>4a7b3aed8453478387a78243c1b73575</code>), keine
+    fortlaufende Nummer. Aufträge sieht nur das Konto, das sie angelegt hat; für alle anderen gibt es sie nicht (404).</p>
+  <p>Für einfache Skripte geht es auch in einem Schritt: <code>POST /pdfs?wait=1</code> wartet bis zu
+    {{ wait_max // 60 }} Minuten und antwortet direkt mit dem PDF.</p>
+
+  <div class="endpoint" id="create"><span class="method">POST</span><h3>/api/v1/pdfs</h3></div>
+  <p>Legt einen Auftrag an. Anfrage-Inhalt: JSON-Objekt, <code>Content-Type: application/json</code> ist Pflicht.
+    Genau eine Quelle angeben: <code>script</code>, <code>script_name</code> oder <code>script_id</code>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Feld</th><th>Typ</th><th>Bedeutung</th></tr></thead>
+    <tbody>
+      <tr><td><code>script</code></td><td>Liste</td><td>Script-JSON im Format des offiziellen Script-Tools. Der erste Eintrag
+        <code>{"id": "_meta", "name": …}</code> liefert den Scriptnamen (ohne Namen kein Logo und kein Name auf dem PDF).</td></tr>
+      <tr><td><code>script_name</code></td><td>Text</td><td>Script per Namen: zuerst unter den bereits geladenen Scripts,
+        sonst auf botcscripts.com (beste Übereinstimmung, neueste Version).</td></tr>
+      <tr><td><code>script_id</code></td><td>Zahl</td><td>Genau eine Script-Version auf botcscripts.com
+        (deren interne Nummer <code>pk</code>).</td></tr>
+      <tr><td><code>options</code></td><td>Objekt</td><td>Optional, siehe unten.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>options</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Option</th><th>Typ</th><th>Standard</th><th>Bedeutung</th></tr></thead>
+    <tbody>
+      <tr><td><code>name_color</code></td><td>Text</td><td><code>"#000000"</code></td><td>Schriftfarbe des Scriptnamens als Hex-Wert.</td></tr>
+      <tr><td><code>logo_description</code></td><td>Text</td><td><code>""</code></td><td>Beschreibung für ein neues Logo, max. 500 Zeichen.</td></tr>
+      <tr><td><code>logo_provider</code></td><td>Text</td><td><code>"pollinations"</code></td><td><code>"pollinations"</code> (kostenlos) oder
+        <code>"openai"</code> (nur wenn auf dem Server eingerichtet; für normale Benutzer begrenzt, siehe <a href="#limits">Grenzen</a>).</td></tr>
+      <tr><td><code>blank_background</code></td><td>true/false</td><td><code>false</code></td><td>Druckerfreundlicher, leerer Hintergrund.</td></tr>
+      <tr><td><code>new_logo</code></td><td>true/false</td><td><code>false</code></td><td>Neues Logo erzeugen statt ein vorhandenes zu verwenden.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Unbekannte Felder oder Optionen werden mit <code>400 invalid_field</code> abgelehnt, damit Tippfehler auffallen.</p>
+
+  <h3>Anfrage</h3>
+<pre>POST /api/v1/pdfs
+Content-Type: application/json
+
+{
+  "script_name": "Trust",
+  "options": {
+    "name_color": "#000000",
+    "logo_provider": "pollinations",
+    "blank_background": false
+  }
+}</pre>
+
+  <h3>Antworten</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Status</th><th>Wann</th><th>Inhalt</th></tr></thead>
+    <tbody>
+      <tr><td><code>202</code></td><td>Auftrag angelegt</td><td><a href="#job">Auftrags-Objekt</a>, Header <code>Location</code> = Status-URL</td></tr>
+      <tr><td><code>200</code></td><td>nur mit <code>?wait=1</code>: fertig</td><td>Das PDF (<code>application/pdf</code>), Header <code>X-Job-Id</code></td></tr>
+      <tr><td><code>422</code></td><td>nur mit <code>?wait=1</code>: Auftrag fehlgeschlagen</td><td>Auftrags-Objekt mit <code>status: "error"</code></td></tr>
+      <tr><td><code>202</code></td><td>nur mit <code>?wait=1</code>: nach {{ wait_max // 60 }} Minuten noch nicht fertig</td><td>Auftrags-Objekt; weiter mit der Status-URL</td></tr>
+    </tbody>
+  </table></div>
+<pre>HTTP/1.1 202 Accepted
+Location: /api/v1/pdfs/4a7b3aed8453478387a78243c1b73575
+
+{
+  "id": "4a7b3aed8453478387a78243c1b73575",
+  "status": "queued",
+  "message": "Wartet in der Warteschlange ...",
+  "partial": false,
+  "log": [],
+  "status_url": "/api/v1/pdfs/4a7b3aed8453478387a78243c1b73575"
+}</pre>
+
+  <div class="endpoint" id="status"><span class="method get">GET</span><h3>/api/v1/pdfs/{id}</h3></div>
+  <p>Liefert den aktuellen Stand des Auftrags als <a href="#job">Auftrags-Objekt</a> (<code>200</code>).
+    Unbekannte, abgelaufene oder fremde Aufträge: <code>404 not_found</code>.</p>
+<pre>{
+  "id": "4a7b3aed8453478387a78243c1b73575",
+  "status": "done",
+  "message": "Fertig.",
+  "partial": false,
+  "filename": "Trust.pdf",
+  "log": ["Gefunden: 'Trust' (Trust.json)", "…", "Finales PDF gespeichert: …"],
+  "status_url": "/api/v1/pdfs/4a7b3aed8453478387a78243c1b73575",
+  "download_url": "/api/v1/pdfs/4a7b3aed8453478387a78243c1b73575/download"
+}</pre>
+
+  <div class="endpoint" id="download"><span class="method get">GET</span><h3>/api/v1/pdfs/{id}/download</h3></div>
+  <p>Liefert das Ergebnis als Datei-Download (<code>Content-Disposition: attachment</code>).</p>
+  <ul>
+    <li><code>200</code> mit <code>application/pdf</code>: das doppelseitige Script-PDF.</li>
+    <li><code>200</code> mit <code>application/zip</code>, wenn <code>partial</code> <code>true</code> ist: Name und Logo
+      konnten nicht eingefügt werden, das ZIP enthält Vorder- und Rückseite ohne Branding.</li>
+    <li><code>409 not_ready</code> solange der Auftrag läuft, <code>409 job_failed</code> wenn er fehlgeschlagen ist.</li>
+  </ul>
+
+  <h2 id="job">Auftrags-Objekt</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Feld</th><th>Typ</th><th>Bedeutung</th></tr></thead>
+    <tbody>
+      <tr><td><code>id</code></td><td>Text</td><td>32-stelliger Zufalls-Hash des Auftrags.</td></tr>
+      <tr><td><code>status</code></td><td>Text</td><td><code>queued</code> → <code>running</code> → <code>done</code> oder <code>error</code>.</td></tr>
+      <tr><td><code>message</code></td><td>Text</td><td>Lesbarer Stand bzw. Fehlerursache.</td></tr>
+      <tr><td><code>partial</code></td><td>true/false</td><td><code>true</code>: Ergebnis ist ein ZIP ohne Name/Logo (siehe Download).</td></tr>
+      <tr><td><code>filename</code></td><td>Text</td><td>Nur bei <code>done</code>: Dateiname des Ergebnisses.</td></tr>
+      <tr><td><code>code</code></td><td>Text</td><td>Nur bei <code>error</code>: <code>quota_exceeded</code> oder <code>job_failed</code>.</td></tr>
+      <tr><td><code>log</code></td><td>Liste</td><td>Die letzten Zeilen des Erzeugungsprotokolls.</td></tr>
+      <tr><td><code>status_url</code></td><td>Text</td><td>Pfad zum Abfragen des Status.</td></tr>
+      <tr><td><code>download_url</code></td><td>Text</td><td>Nur bei <code>done</code>: Pfad zum Ergebnis.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 id="errors">Fehler</h2>
+  <p>Fehler kommen immer als JSON mit lesbarer Meldung und einem festen Code zum Auswerten:</p>
+  <pre>{ "error": "Bitte genau eines angeben: script, script_name oder script_id.", "code": "invalid_source" }</pre>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Status</th><th>Code</th><th>Bedeutung</th></tr></thead>
+    <tbody>
+      <tr><td>400</td><td><code>invalid_json</code></td><td>Inhalt ist kein JSON-Objekt.</td></tr>
+      <tr><td>400</td><td><code>invalid_source</code></td><td>Keine oder mehrere Quellen angegeben.</td></tr>
+      <tr><td>400</td><td><code>invalid_field</code></td><td>Unbekanntes Feld, falscher Typ oder ungültiger Wert (z.&nbsp;B. Farbe).</td></tr>
+      <tr><td>400</td><td><code>invalid_script</code></td><td>Die Script-JSON ist leer oder hat ein falsches Format.</td></tr>
+      <tr><td>401</td><td><code>unauthorized</code></td><td>Anmeldung fehlt oder ist falsch.</td></tr>
+      <tr><td>403</td><td><code>account_pending</code></td><td>Konto noch nicht freigeschaltet.</td></tr>
+      <tr><td>403</td><td><code>password_change_required</code></td><td>Erst in der Web-Oberfläche ein eigenes Passwort setzen.</td></tr>
+      <tr><td>404</td><td><code>not_found</code></td><td>Auftrag oder Endpunkt gibt es nicht (oder nicht für dieses Konto).</td></tr>
+      <tr><td>405</td><td><code>method_not_allowed</code></td><td>Falsche HTTP-Methode.</td></tr>
+      <tr><td>409</td><td><code>not_ready</code></td><td>Download angefragt, aber der Auftrag läuft noch.</td></tr>
+      <tr><td>409</td><td><code>job_failed</code></td><td>Download angefragt, aber der Auftrag ist fehlgeschlagen.</td></tr>
+      <tr><td>413</td><td><code>too_large</code></td><td>Anfrage größer als {{ max_upload_mb }}&nbsp;MB.</td></tr>
+      <tr><td>415</td><td><code>unsupported_media_type</code></td><td>Kein <code>Content-Type: application/json</code>.</td></tr>
+      <tr><td>429</td><td><code>too_many_attempts</code></td><td>Anmeldung nach Fehlversuchen 15 Minuten gesperrt.</td></tr>
+      <tr><td>429</td><td><code>quota_exceeded</code></td><td>OpenAI-Logo-Limit erreicht; die Meldung nennt, ab wann es wieder geht.</td></tr>
+    </tbody>
+  </table></div>
+  <p>Fehler, die erst während der Erzeugung auftreten (Script auf botcscripts.com nicht gefunden, Logo-Limit bei
+    Suche per Name, …), erscheinen im Auftrags-Objekt als <code>status: "error"</code> mit <code>message</code> und <code>code</code>.</p>
+
+  <h2 id="examples">Beispiele</h2>
+  <h3>curl, in einem Schritt</h3>
+<pre>curl -u 'anna@example.org:geheimes-passwort' \
+     -H 'Content-Type: application/json' \
+     -d '{"script_name": "Trust"}' \
+     -o Trust.pdf --fail-with-body \
+     '{{ base_url }}/pdfs?wait=1'</pre>
+
+  <h3>curl, mit eigener Script-JSON</h3>
+<pre>curl -u 'anna@example.org:geheimes-passwort' \
+     -H 'Content-Type: application/json' \
+     -d "{\"script\": $(cat mein_script.json), \"options\": {\"blank_background\": true}}" \
+     '{{ base_url }}/pdfs'</pre>
+
+  <h3>Python (requests), mit Status-Abfrage</h3>
+<pre>import time
+import requests
+
+BASE = "{{ base_url }}"
+auth = ("anna@example.org", "geheimes-passwort")
+
+job = requests.post(f"{BASE}/pdfs", auth=auth, json={
+    "script_name": "Trust",
+    "options": {"logo_provider": "pollinations"},
+}).json()
+
+while job["status"] in ("queued", "running"):
+    time.sleep(3)
+    job = requests.get(f"{BASE}/pdfs/{job['id']}", auth=auth).json()
+
+if job["status"] == "error":
+    raise SystemExit(f"Fehlgeschlagen ({job['code']}): {job['message']}")
+
+pdf = requests.get(f"{BASE}/pdfs/{job['id']}/download", auth=auth)
+pdf.raise_for_status()
+open(job["filename"], "wb").write(pdf.content)</pre>
+
+  <h2 id="limits">Grenzen</h2>
+  <ul>
+    <li>Anfragen höchstens {{ max_upload_mb }}&nbsp;MB.</li>
+    <li>Aufträge laufen nacheinander. Ergebnisse werden <strong>1 Stunde</strong> nach Fertigstellung gelöscht.</li>
+    <li><code>?wait=1</code> wartet höchstens {{ wait_max // 60 }} Minuten. Ein vorgeschalteter Proxy muss so lange
+      Verbindungen erlauben, sonst lieber den Status abfragen.</li>
+    <li>Neue Logos über OpenAI: normale Benutzer höchstens 5 in 7 Tagen, Admins unbegrenzt. Logos aus dem Cache und
+      Pollinations zählen nicht. Dasselbe Limit gilt für Web-Oberfläche und API gemeinsam.</li>
+    <li>Fehlgeschlagene Anmeldungen: nach 5 Versuchen 15 Minuten Sperre.</li>
+  </ul>
+{% endblock %}

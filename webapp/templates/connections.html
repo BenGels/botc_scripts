@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Verbindungen · BotC Script-PDF{% endblock %}
+{% block styles %}
+  .grants { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .grants li { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px; }
+  .grants .meta { color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
+  .grants form { margin: 0; }
+  .grants button { width: auto; margin: 0; padding: 6px 12px; font-size: .875rem;
+                   background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .mcp-url { display: block; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+             background: var(--bg); font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  .howto ol { margin: 8px 0 0; padding-left: 1.3em; display: grid; gap: 4px; }
+{% endblock %}
+{% block content %}
+  <h1>Verbindungen</h1>
+  <p class="lead">Apps wie Claude, denen du Zugriff auf dein Konto gegeben hast.</p>
+
+  {% if rows %}
+  <ul class="grants">
+    {% for r in rows %}
+    <li class="card">
+      <div>
+        <strong>{{ r.name }}</strong>
+        <div class="meta">{{ r.host }} · verbunden {{ r.created_at }} · zuletzt genutzt {{ r.last_used_at }}</div>
+      </div>
+      <form method="post" action="{{ url_for('oauth.revoke', grant_id=r.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Trennen</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="card">Noch keine App verbunden.</p>
+  {% endif %}
+
+  <section class="card howto" style="margin-top: 20px">
+    <strong>Claude verbinden</strong>
+    <ol>
+      <li>In claude.ai: <em>Einstellungen → Connectors → Eigenen Connector hinzufügen</em>.</li>
+      <li>Als URL eintragen: <span class="mcp-url">{{ mcp_url }}</span></li>
+      <li>„Verbinden“ wählen, hier anmelden und den Zugriff erlauben.</li>
+    </ol>
+    <p class="hint" style="margin-top: 8px">Claude Code: <code>claude mcp add --transport http botc-pdf {{ mcp_url }}</code>,
+      danach in Claude Code <code>/mcp</code> aufrufen und anmelden.</p>
+  </section>
+{% endblock %}

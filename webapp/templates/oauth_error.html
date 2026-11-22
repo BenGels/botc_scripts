@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Verbindung fehlgeschlagen · BotC Script-PDF{% endblock %}
+{% block content %}
+  <h1>Verbindung fehlgeschlagen</h1>
+  <p class="flash error" role="alert">{{ message }}</p>
+  <p>Bitte starte das Verbinden in der App (z.&nbsp;B. in Claude) neu. Klappt es dann immer noch nicht,
+    entferne die Verbindung dort und füge sie noch einmal hinzu.</p>
+{% endblock %}

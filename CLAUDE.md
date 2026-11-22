@@ -1,0 +1,2 @@
+   - Niemals `cd` in Bash-Befehlen verwenden. Pfade immer relativ zum Projektroot angeben (z. B. `grep -n ... Scripts/Spells/Base/Spell.cs`).
+   - Zum Suchen und Lesen die Tools Grep, Glob und Read benutzen statt grep/find/ls/cat in Bash.

@@ -1,0 +1,22 @@
+# Geheimnisse und lokale Umgebung - nie ins Image
+.env
+.env.*
+.venv
+.git
+.claude
+.idea
+webapp_data
+
+# Erzeugtes und Arbeitsdateien, die das Image nicht braucht
+build
+dist
+print
+inputs*
+examples
+tests
+skills
+**/__pycache__
+**/*.pyc
+src/botc_tokens/__version__.py
+src/*.egg-info
+*.sh

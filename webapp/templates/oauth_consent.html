@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Zugriff erlauben · BotC Script-PDF{% endblock %}
+{% block styles %}
+  .consent dl { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 6px 14px; margin: 0 0 4px; }
+  .consent dt { color: var(--muted); }
+  .consent dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+  .consent ul { margin: 8px 0 0; padding-left: 1.2em; }
+  .choices { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .choices button { width: auto; margin: 0; flex: 1 1 200px; }
+  .choices button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  @media (max-width: 480px) { .consent dl { grid-template-columns: minmax(0, 1fr); gap: 0; } .consent dd { margin-bottom: 8px; } }
+{% endblock %}
+{% block content %}
+  <h1>Zugriff erlauben?</h1>
+  <p class="lead">Eine App möchte in deinem Namen Script-PDFs erzeugen.</p>
+
+  <form method="post" class="card consent">
+    <dl>
+      <dt>App</dt><dd>{{ client['client_name'] }}</dd>
+      <dt>Rückkehr zu</dt><dd>{{ redirect_host }}</dd>
+      <dt>Dein Konto</dt><dd>{{ g.user['name'] }} ({{ g.user['email'] }})</dd>
+    </dl>
+    <p>Die App darf dann:</p>
+    <ul>
+      <li>Script-PDFs erzeugen und herunterladen, wie du es in dieser Web-App kannst,</li>
+      <li>dabei dein Logo-Kontingent für OpenAI nutzen.</li>
+    </ul>
+    <p class="hint">Sie sieht dein Passwort nicht. Unter „Verbindungen“ kannst du den Zugriff jederzeit wieder entziehen.
+      Erlaube nur Apps, die du selbst gerade verbinden willst (z.&nbsp;B. Claude unter
+      <strong>claude.ai</strong>).</p>
+
+    {% for key, value in params.items() if value %}
+    <input type="hidden" name="{{ key }}" value="{{ value }}">
+    {% endfor %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="choices">
+      <button type="submit" name="decision" value="allow">Erlauben</button>
+      <button class="secondary" type="submit" name="decision" value="deny">Ablehnen</button>
+    </div>
+  </form>
+{% endblock %}

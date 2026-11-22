@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Benutzerverwaltung · BotC Script-PDF{% endblock %}
+{% block main_class %} class="wide"{% endblock %}
+{% block styles %}
+  main.wide { max-width: 860px; }
+  .users { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .users li { padding: 16px 20px; }
+  .users .head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .users .name { font-weight: 600; }
+  .users .email, .users .when { color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
+  .badge.pending { background: var(--warn); }
+  .badge.muted { background: var(--line); color: var(--text); }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  .actions form { margin: 0; }
+  .actions button, .actions summary.btn { width: auto; margin: 0; padding: 6px 12px; font-size: .875rem; }
+  button.secondary, summary.btn { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button.danger { background: var(--err); color: var(--bg); }
+  summary.btn { display: inline-block; border-radius: 8px; font-weight: 600; cursor: pointer; list-style: none; }
+  summary.btn::-webkit-details-marker { display: none; }
+  details.confirm { margin: 0; }
+  details.confirm[open] { flex-basis: 100%; }
+  details.confirm .confirm-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px;
+                                 padding: 10px 12px; border: 1px solid var(--err); border-radius: 8px; }
+  .summary-line { color: var(--muted); margin: 0 0 16px; }
+  .quota { margin-top: 6px; font-size: .875rem; }
+  .quota.exhausted { color: var(--warn); }
+{% endblock %}
+{% block content %}
+  <h1>Benutzerverwaltung</h1>
+  <p class="summary-line">{{ rows|length }} Konten{% if pending %}, davon <strong>{{ pending }} offene Anmeldung{{ 'en' if pending != 1 }}</strong>{% endif %}.</p>
+
+  <ul class="users">
+    {% for u in rows %}
+    {% set is_self = u['id'] == g.user['id'] %}
+    <li class="card">
+      <div class="head">
+        <span class="name">{{ u['name'] }}</span>
+        {% if u['status'] == users.PENDING %}<span class="badge pending">Offen</span>{% endif %}
+        {% if u['role'] == users.ADMIN %}<span class="badge">Admin</span>{% endif %}
+        {% if is_self %}<span class="badge muted">Du</span>{% endif %}
+      </div>
+      <div class="email">{{ u['email'] }}</div>
+      <div class="when">Registriert {{ u['created_at']|localtime }}{% if u['approved_at'] %} · freigeschaltet {{ u['approved_at']|localtime }}{% endif %}</div>
+      {% set q = quotas[u['id']] %}
+      <div class="quota{% if q.limited and q.exhausted %} exhausted{% endif %}">
+        OpenAI-Logos:
+        {% if not q.limited %}
+          unbegrenzt (Admin)
+        {% else %}
+          <strong>{{ q.used }} von {{ q.limit }}</strong> in 7 Tagen verbraucht{% if q.running %}, {{ q.running }} läuft gerade{% endif %}
+          {% if q.exhausted %}
+            · <strong>ausgeschöpft</strong>{% if q.next_free_at %}, wieder frei ab {{ q.next_free_at }}{% endif %}
+          {% elif q.next_free_at %}
+            · nächster Platz wird frei am {{ q.next_free_at }}
+          {% endif %}
+        {% endif %}
+      </div>
+
+      {% if u['status'] == users.PENDING or not is_self %}
+      <div class="actions">
+        {% if u['status'] == users.PENDING %}
+        <form method="post" action="{{ url_for('admin_action', user_id=u['id']) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" name="action" value="approve">Freischalten</button>
+        </form>
+        {% endif %}
+        {% if not is_self %}
+        <form method="post" action="{{ url_for('admin_action', user_id=u['id']) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% if u['role'] == users.ADMIN %}
+          <button class="secondary" type="submit" name="action" value="make_user">Zum Benutzer machen</button>
+          {% else %}
+          <button class="secondary" type="submit" name="action" value="make_admin">Zum Admin machen</button>
+          {% endif %}
+        </form>
+        <details class="confirm">
+          <summary class="btn">Löschen …</summary>
+          <form class="confirm-box" method="post" action="{{ url_for('admin_action', user_id=u['id']) }}">
+            <span>{{ u['name'] }} und alle Daten dazu endgültig löschen?</span>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="danger" type="submit" name="action" value="delete">Ja, löschen</button>
+          </form>
+        </details>
+        {% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+{% endblock %}
